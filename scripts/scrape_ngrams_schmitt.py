@@ -17,7 +17,7 @@ def get_ngram_data(queries, year_start=1945, year_end=2019, corpus=26, smoothing
     
     results = {}
     
-    for query in queries:
+    for i, query in enumerate(queries):
         # Format URL
         url = (
             f"https://books.google.com/ngrams/graph"
@@ -27,7 +27,7 @@ def get_ngram_data(queries, year_start=1945, year_end=2019, corpus=26, smoothing
             f"&corpus={corpus}"
             f"&smoothing={smoothing}"
         )
-        
+
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -35,39 +35,44 @@ def get_ngram_data(queries, year_start=1945, year_end=2019, corpus=26, smoothing
                 "Chrome/120.0.0.0 Safari/537.36"
             )
         }
-        
+
         response = requests.get(url, headers=headers)
-        
+
         if response.status_code != 200:
             print(f"Failed to fetch {query}: status {response.status_code}")
             results[query] = None
             continue
-        
+
         # Extract the timeseries array from the HTML
         pattern = r'"timeseries":\s*\[([^\]]+)\]'
         match = re.search(pattern, response.text)
-        
+
         if not match:
             print(f"No timeseries found for {query}")
             results[query] = None
             continue
-        
+
         # Parse the floating point numbers
         raw = match.group(1)
         values = [float(x.strip()) for x in raw.split(',')]
-        
+
         # Build a year index
         years = list(range(year_start, year_end + 1))
-        
+
         # Sanity check
         if len(values) != len(years):
             print(f"Warning: {query} returned {len(values)} values for {len(years)} years")
-        
+
         results[query] = dict(zip(years, values))
         print(f"Fetched {query}: {len(values)} years of data")
-        
+
         # Rate limit
-        time.sleep(2)
+        if (i + 1) % 10 == 0 and (i + 1) % 50 != 0:
+            time.sleep(10)
+        elif (i + 1) % 50 == 0:
+            time.sleep(60)
+        else:
+            time.sleep(2)
     
     return results
 

@@ -291,20 +291,47 @@ run_placebo_test <- function(df, treated_name, treatment_year,
           post_gaps <- gap_df$gap[gap_df$Year >= treatment_year]
           pre_rmspe <- sqrt(mean(pre_gaps^2))
           post_rmspe <- sqrt(mean(post_gaps^2))
-          if (pre_rmspe > 0) post_rmspe / pre_rmspe else NA_real_
-        }, error = function(e) NA_real_)
+          ratio <- if (pre_rmspe > 0) post_rmspe / pre_rmspe else NA_real_
+          std_gaps <- as.numeric(gaps) / pre_rmspe
+          names(std_gaps) <- years_plot
+          list(ratio = ratio, std_gaps = std_gaps)
+          }, error = function(e) list(ratio = NA_real_, std_gaps = NULL))
       }, future.seed=TRUE)
     })
 
     plan(sequential)  # clean up
     Sys.sleep(2)
 
-    rmspe_ratios <- setNames(unlist(rmspe_list), all_names)
+    rmspe_ratios <- setNames(sapply(rmspe_list, function(x) x$ratio), all_names)
 
     # Compute p-value: fraction of units with RMSPE ratio >= treated unit's ratio
     treated_ratio <- rmspe_ratios[treated_name]
     valid_ratios <- rmspe_ratios[!is.na(rmspe_ratios)]
     p_value <- mean(valid_ratios >= treated_ratio)
+
+    # Compute per-year p-values
+    valid_results <- Filter(function(x) !is.null(x$std_gaps), rmspe_list)
+    valid_names <- all_names[sapply(rmspe_list, function(x) !is.null(x$std_gaps))]
+
+    all_years <- as.numeric(names(valid_results[[1]]$std_gaps))
+    gap_matrix <- do.call(rbind, lapply(valid_results, function(x) x$std_gaps))
+    rownames(gap_matrix) <- valid_names
+
+    schmitt_gaps <- gap_matrix[treated_name, ]
+
+    pvals_onesided <- sapply(as.character(all_years), function(yr) {
+      mean(gap_matrix[, yr] >= schmitt_gaps[yr], na.rm = TRUE)
+    })
+    pvals_twosided <- sapply(as.character(all_years), function(yr) {
+      mean(abs(gap_matrix[, yr]) >= abs(schmitt_gaps[yr]), na.rm = TRUE)
+    })
+
+    pval_grid <- tibble(
+      Year = all_years,
+      Std_gap = as.numeric(schmitt_gaps),
+      p_onesided = pvals_onesided,
+      p_twosided = pvals_twosided
+    )
 
     # Standardized p-values for each post-treatment year
     # (simplified: we return the joint post-treatment RMSPE ratio p-value)
@@ -313,7 +340,8 @@ run_placebo_test <- function(df, treated_name, treatment_year,
         rmspe_ratios = rmspe_ratios,
         treated_ratio = treated_ratio,
         joint_post_std_p = p_value,
-        n_placebos = sum(!is.na(rmspe_ratios)) - 1  # exclude treated
+        n_placebos = sum(!is.na(rmspe_ratios)) - 1,  # exclude treated
+        pval_grid = pval_grid
     )
 }
 
@@ -493,6 +521,31 @@ cat("Snapshot (1950-2016):", n_distinct(snapshot_cs_1950_2016$Name), "authors,",
         NULL
     })
 
+    for (i in list(
+    list(res = baseline_result_0, year = 1974),
+    list(res = baseline_result_1, year = 1983),
+    list(res = baseline_result_2, year = 1994),
+    list(res = baseline_result_3, year = 1965)
+    )) {
+        if (!is.null(i$res)) {
+            dp <- i$res$dataprep_out
+            so <- i$res$synth_out
+            Y_t <- as.numeric(dp$Y1plot)
+            Y_s <- as.numeric(dp$Y0plot %*% so$solution.w)
+            years <- as.numeric(rownames(dp$Y1plot))
+
+            pre_gaps <- Y_t[years < i$year] - Y_s[years < i$year]
+            post_gaps <- Y_t[years >= i$year] - Y_s[years >= i$year]
+
+            cat(sprintf("\n--- Treatment %d ---\n", i$year))
+            cat("Pre-treatment RMSPE:", sqrt(mean(pre_gaps^2)), "\n")
+            cat("Post-treatment RMSPE:", sqrt(mean(post_gaps^2)), "\n")
+            cat("Mean post-treatment gap:", mean(post_gaps), "\n")
+            cat("Mean post-treatment % diff:", mean((Y_t[years >= i$year] - Y_s[years >= i$year]) / Y_s[years >= i$year] * 100), "\n")
+            cat("RMSPE ratio (post/pre):", sqrt(mean(post_gaps^2)) / sqrt(mean(pre_gaps^2)), "\n")
+        }
+    }
+
       if (!is.null(baseline_result_0)) {
           cat("\nRunning placebo tests (this may take a while)...\n")
           baseline_placebo_0 <- tryCatch({
@@ -555,4 +608,9 @@ cat("Snapshot (1950-2016):", n_distinct(snapshot_cs_1950_2016$Name), "authors,",
           save_synth_results(baseline_result_3, baseline_placebo_3, baseline_dir_3, label="_1965")
           cat("\nBaseline p-value (joint post std):",
               ifelse(!is.null(baseline_placebo_3), baseline_placebo_3$joint_post_std_p, "N/A"), "\n")
+      }
+
+
+      if (!is.null(baseline_placebo_2) && !is.null(baseline_placebo_2$pval_grid)) {
+        print(baseline_placebo_2$pval_grid, n = Inf)
       }

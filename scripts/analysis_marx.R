@@ -23,11 +23,11 @@
 # frequency, per-year gap, per-year percent difference, list of donor weights,
 # v-weights by predictor, balance table comparing treated and synthetic by
 # predictor, joint post-std p-value, and post/pre RMSPE ratios by author to
-# ../schmitt_scm/results/Treatment_[YEAR]/synth_results_[YEAR].xlsx).
+# ../schmitt_scm/results/Treatment_Marx_1917/synth_results_[YEAR].xlsx).
 # It outputs a graph comparing the actual and synthetic Ngram frequency over
 # the window from the beginning of the pre-treatment period to the end of the
 # post-treatment period to
-# ../schmitt_scm/results/Treatment_[YEAR]/synth_plot_[YEAR].pdf)
+# ../schmitt_scm/results/Treatment_Marx_1917/synth_plot_[YEAR].pdf)
 #
 # This ports the core analysis from
 # "2_marx_synthetic_control_perform_synth.do", using the R `Synth` package
@@ -437,7 +437,7 @@ cat("Snapshot (1878-1932):", n_distinct(snapshot_km_1878_1932$Name), "authors,",
     cat("BASELINE SCM: Karl Marx, treatment 1917\n")
     cat("========================================\n")
 
-    baseline_dir <- file.path(results_dir, "Treatment_1917")
+    baseline_dir <- file.path(results_dir, "Treatment_Marx_1917")
 
     baseline_result <- tryCatch({
         run_synth(snapshot_km_1878_1932, "Karl Marx",

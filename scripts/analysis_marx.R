@@ -233,9 +233,10 @@ run_synth <- function(df, treated_name, treatment_year, pre_start,
     )
 
     # Run synth
-    # nlminb chosen because BFGS fails to converge on authors of sufficiently
-    # abnormal e.g. "YearofPublication" values
-    synth_out <- synth(dp, "nlminb")
+    # L-BFGS-B appears to converge best on units with out-of-range
+    # values on collinear variables
+    # Other optimizers are worth a try
+    synth_out <- synth(dp, "L-BFGS-B")
 
     list(
         synth_out = synth_out,

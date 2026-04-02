@@ -15,7 +15,7 @@ df.index = df.index.astype(int)
 df = df.fillna(0)
 
 # 3. Restrict to analysis window
-df = df.loc[1945:2019]
+df = df.loc[1878:1932]
 
 # 4. Rename columns cleanly if needed
 df.columns = df.columns.str.strip()

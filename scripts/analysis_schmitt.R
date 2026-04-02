@@ -1,5 +1,5 @@
 ################################################################################
-# Partial R Port of Magness & Makovi (2023)
+# Modified R Port of Magness & Makovi (2023)
 # "The Mainstreaming of Marx: Measuring the Effect of the Russian Revolution
 #  on Karl Marx's Influence"
 #
@@ -144,10 +144,10 @@ if (length(unmatched) > 0) {
 # ==============================================================================
 
 minmax_normalize <- function(x) {
-  mn <- min(x, na.rm = TRUE)
-  mx <- max(x, na.rm = TRUE)
-  if (mx == mn) return(rep(0, length(x)))
-  (x - mn) / (mx - mn)
+    mn <- min(x, na.rm = TRUE)
+    mx <- max(x, na.rm = TRUE)
+    if (mx == mn) return(rep(0, length(x)))
+    (x - mn) / (mx - mn)
 }
 
 #' Normalize key variables in the panel to [0,1] (min-max)
@@ -233,9 +233,10 @@ run_synth <- function(df, treated_name, treatment_year, pre_start,
     )
 
     # Run synth
-    # nlminb chosen because BFGS fails to converge on authors of sufficiently
-    # abnormal e.g. "YearofPublication" values
-    synth_out <- synth(dp, "nlminb")
+    # L-BFGS-B appears to converge best on units with out-of-range
+    # values on collinear variables
+    # Other optimizers are worth a try
+    synth_out <- synth(dp, "L-BFGS-B")
 
     list(
         synth_out = synth_out,
@@ -254,11 +255,11 @@ run_synth <- function(df, treated_name, treatment_year, pre_start,
 #' Runs synth for every unit as if it were treated, then computes
 #' RMSPE ratios to get permutation-based p-values
 run_placebo_test <- function(df, treated_name, treatment_year,
-                              pre_start, pre_end, post_end,
-                              outcome_var = "cite_English",
-                              predictors = NULL,
-                              special_predictors = NULL,
-                              verbose = TRUE) {
+                             pre_start, pre_end, post_end,
+                             outcome_var = "cite_English",
+                             predictors = NULL,
+                             special_predictors = NULL,
+                             verbose = TRUE) {
 
     all_names <- sort(unique(df$Name))
 
@@ -273,30 +274,30 @@ run_placebo_test <- function(df, treated_name, treatment_year,
 
     # Compute list of RSMPE ratios, parallelized
     with_progress({
-      p <- progressor(along = all_names)
-      rmspe_list <- future_lapply(seq_along(all_names), function(i) {
-        p(all_names[i])
-        nm <- all_names[i]
-        tryCatch({
-          res <- run_synth(df, nm, outcome_var = outcome_var,
-                         treatment_year = treatment_year,
-                         pre_start = pre_start, pre_end = pre_end,
-                         post_end = post_end,
-                         predictors = predictors,
-                         special_predictors = special_predictors)
-          gaps <- res$dataprep_out$Y1plot - (res$dataprep_out$Y0plot %*% res$synth_out$solution.w)
-          years_plot <- as.numeric(rownames(res$dataprep_out$Y1plot))
-          gap_df <- data.frame(Year = years_plot, gap = as.numeric(gaps))
-          pre_gaps <- gap_df$gap[gap_df$Year < treatment_year]
-          post_gaps <- gap_df$gap[gap_df$Year >= treatment_year]
-          pre_rmspe <- sqrt(mean(pre_gaps^2))
-          post_rmspe <- sqrt(mean(post_gaps^2))
-          ratio <- if (pre_rmspe > 0) post_rmspe / pre_rmspe else NA_real_
-          std_gaps <- as.numeric(gaps) / pre_rmspe
-          names(std_gaps) <- years_plot
-          list(ratio = ratio, std_gaps = std_gaps)
-          }, error = function(e) list(ratio = NA_real_, std_gaps = NULL))
-      }, future.seed=TRUE)
+        p <- progressor(along = all_names)
+        rmspe_list <- future_lapply(seq_along(all_names), function(i) {
+            p(all_names[i])
+            nm <- all_names[i]
+            tryCatch({
+                res <- run_synth(df, nm, outcome_var = outcome_var,
+                                 treatment_year = treatment_year,
+                                 pre_start = pre_start, pre_end = pre_end,
+                                 post_end = post_end,
+                                 predictors = predictors,
+                                 special_predictors = special_predictors)
+                gaps <- res$dataprep_out$Y1plot - (res$dataprep_out$Y0plot %*% res$synth_out$solution.w)
+                years_plot <- as.numeric(rownames(res$dataprep_out$Y1plot))
+                gap_df <- data.frame(Year = years_plot, gap = as.numeric(gaps))
+                pre_gaps <- gap_df$gap[gap_df$Year < treatment_year]
+                post_gaps <- gap_df$gap[gap_df$Year >= treatment_year]
+                pre_rmspe <- sqrt(mean(pre_gaps^2))
+                post_rmspe <- sqrt(mean(post_gaps^2))
+                ratio <- if (pre_rmspe > 0) post_rmspe / pre_rmspe else NA_real_
+                std_gaps <- as.numeric(gaps) / pre_rmspe
+                names(std_gaps) <- years_plot
+                list(ratio = ratio, std_gaps = std_gaps)
+            }, error = function(e) list(ratio = NA_real_, std_gaps = NULL))
+        }, future.seed=TRUE)
     })
 
     plan(sequential)  # clean up
@@ -320,17 +321,17 @@ run_placebo_test <- function(df, treated_name, treatment_year,
     schmitt_gaps <- gap_matrix[treated_name, ]
 
     pvals_onesided <- sapply(as.character(all_years), function(yr) {
-      mean(gap_matrix[, yr] >= schmitt_gaps[yr], na.rm = TRUE)
+        mean(gap_matrix[, yr] >= schmitt_gaps[yr], na.rm = TRUE)
     })
     pvals_twosided <- sapply(as.character(all_years), function(yr) {
-      mean(abs(gap_matrix[, yr]) >= abs(schmitt_gaps[yr]), na.rm = TRUE)
+        mean(abs(gap_matrix[, yr]) >= abs(schmitt_gaps[yr]), na.rm = TRUE)
     })
 
     pval_grid <- tibble(
-      Year = all_years,
-      Std_gap = as.numeric(schmitt_gaps),
-      p_onesided = pvals_onesided,
-      p_twosided = pvals_twosided
+        Year = all_years,
+        Std_gap = as.numeric(schmitt_gaps[as.character(all_years)]),
+        p_onesided = pvals_onesided,
+        p_twosided = pvals_twosided
     )
 
     # Standardized p-values for each post-treatment year
@@ -372,10 +373,10 @@ save_synth_results <- function(synth_result, placebo_result = NULL,
     w <- as.numeric(so$solution.w)
     x0_ids <- as.numeric(colnames(dp$X0))
     id_to_name <- setNames(dp$names.and.numbers$unit.names,
-                            dp$names.and.numbers$unit.numbers)
+                           dp$names.and.numbers$unit.numbers)
     weights <- tibble(
-      Name = id_to_name[as.character(x0_ids)],
-      Weight = w
+        Name = id_to_name[as.character(x0_ids)],
+        Weight = w
     ) %>% arrange(desc(Weight))
 
     # V-weights (predictor importance)
@@ -461,156 +462,124 @@ cat("Snapshot (1950-2016):", n_distinct(snapshot_cs_1950_2016$Name), "authors,",
 # 6. BASELINE SYNTHETIC CONTROL
 # ==============================================================================
 
-    cat("\n========================================\n")
-    cat("BASELINE SCM: Carl Schmitt, treatment 1974\n")
-    cat("========================================\n")
+cat("\n========================================\n")
+cat("BASELINE SCM: Carl Schmitt, treatment 1974\n")
+cat("========================================\n")
 
-    baseline_dir_0 <- file.path(results_dir, "Treatment_1974")
+baseline_dir_0 <- file.path(results_dir, "Treatment_1974")
 
-    baseline_result_0 <- tryCatch({
-        run_synth(snapshot_cs_1950_2016, "Carl Schmitt",
-                  treatment_year = 1974,
-                  pre_start = 1950, pre_end=1973, post_end=1984)
-    }, error = function(e) {
-        cat("ERROR in baseline synth:", conditionMessage(e), "\n")
-        NULL
-    })
+baseline_result_0 <- tryCatch({
+    run_synth(snapshot_cs_1950_2016, "Carl Schmitt",
+              treatment_year = 1974,
+              pre_start = 1950, pre_end=1973, post_end=1993)
+}, error = function(e) {
+    cat("ERROR in baseline synth:", conditionMessage(e), "\n")
+    NULL
+})
 
-    cat("\n========================================\n")
-    cat("BASELINE SCM: Carl Schmitt, treatment 1983\n")
-    cat("========================================\n")
+cat("\n========================================\n")
+cat("BASELINE SCM: Carl Schmitt, treatment 1994\n")
+cat("========================================\n")
 
-    baseline_dir_1 <- file.path(results_dir, "Treatment_1983")
+baseline_dir_1 <- file.path(results_dir, "Treatment_1994")
 
-    baseline_result_1 <- tryCatch({
-        run_synth(snapshot_cs_1950_2016, "Carl Schmitt",
-                  treatment_year = 1983,
-                  pre_start = 1950, pre_end=1982, post_end=1993)
-    }, error = function(e) {
-        cat("ERROR in baseline synth:", conditionMessage(e), "\n")
-        NULL
-    })
+baseline_result_1 <- tryCatch({
+    run_synth(snapshot_cs_1950_2016, "Carl Schmitt",
+              treatment_year = 1994,
+              pre_start = 1950, pre_end=1993, post_end=2016)
+}, error = function(e) {
+    cat("ERROR in baseline synth:", conditionMessage(e), "\n")
+    NULL
+})
 
-    cat("\n========================================\n")
-    cat("BASELINE SCM: Carl Schmitt, treatment 1994\n")
-    cat("========================================\n")
+cat("\n========================================\n")
+cat("BASELINE SCM: Carl Schmitt, treatment 1965\n")
+cat("========================================\n")
 
-    baseline_dir_2 <- file.path(results_dir, "Treatment_1994")
+baseline_dir_2 <- file.path(results_dir, "Treatment_1965")
 
-    baseline_result_2 <- tryCatch({
-        run_synth(snapshot_cs_1950_2016, "Carl Schmitt",
-                  treatment_year = 1994,
-                  pre_start = 1950, pre_end=1993, post_end=2016)
-    }, error = function(e) {
-        cat("ERROR in baseline synth:", conditionMessage(e), "\n")
-        NULL
-    })
+baseline_result_2 <- tryCatch({
+    run_synth(snapshot_cs_1950_2016, "Carl Schmitt",
+              treatment_year = 1965,
+              pre_start= 1950, pre_end=1964, post_end=1973)
+}, error = function(e) {
+    cat("ERROR in baseline synth:", conditionMessage(e), "\n")
+    NULL
+})
 
-    cat("\n========================================\n")
-    cat("BASELINE SCM: Carl Schmitt, treatment 1965\n")
-    cat("========================================\n")
-
-    baseline_dir_3 <- file.path(results_dir, "Treatment_1965")
-
-    baseline_result_3 <- tryCatch({
-        run_synth(snapshot_cs_1950_2016, "Carl Schmitt",
-                  treatment_year = 1965,
-                  pre_start= 1950, pre_end=1964, post_end=1973)
-    }, error = function(e) {
-        cat("ERROR in baseline synth:", conditionMessage(e), "\n")
-        NULL
-    })
-
-    for (i in list(
+for (i in list(
     list(res = baseline_result_0, year = 1974),
-    list(res = baseline_result_1, year = 1983),
-    list(res = baseline_result_2, year = 1994),
-    list(res = baseline_result_3, year = 1965)
-    )) {
-        if (!is.null(i$res)) {
-            dp <- i$res$dataprep_out
-            so <- i$res$synth_out
-            Y_t <- as.numeric(dp$Y1plot)
-            Y_s <- as.numeric(dp$Y0plot %*% so$solution.w)
-            years <- as.numeric(rownames(dp$Y1plot))
+    list(res = baseline_result_1, year = 1994),
+    list(res = baseline_result_2, year = 1965)
+)) {
+    if (!is.null(i$res)) {
+        dp <- i$res$dataprep_out
+        so <- i$res$synth_out
+        Y_t <- as.numeric(dp$Y1plot)
+        Y_s <- as.numeric(dp$Y0plot %*% so$solution.w)
+        years <- as.numeric(rownames(dp$Y1plot))
 
-            pre_gaps <- Y_t[years < i$year] - Y_s[years < i$year]
-            post_gaps <- Y_t[years >= i$year] - Y_s[years >= i$year]
+        pre_gaps <- Y_t[years < i$year] - Y_s[years < i$year]
+        post_gaps <- Y_t[years >= i$year] - Y_s[years >= i$year]
 
-            cat(sprintf("\n--- Treatment %d ---\n", i$year))
-            cat("Pre-treatment RMSPE:", sqrt(mean(pre_gaps^2)), "\n")
-            cat("Post-treatment RMSPE:", sqrt(mean(post_gaps^2)), "\n")
-            cat("Mean post-treatment gap:", mean(post_gaps), "\n")
-            cat("Mean post-treatment % diff:", mean((Y_t[years >= i$year] - Y_s[years >= i$year]) / Y_s[years >= i$year] * 100), "\n")
-            cat("RMSPE ratio (post/pre):", sqrt(mean(post_gaps^2)) / sqrt(mean(pre_gaps^2)), "\n")
-        }
+        cat(sprintf("\n--- Treatment %d ---\n", i$year))
+        cat("Pre-treatment RMSPE:", sqrt(mean(pre_gaps^2)), "\n")
+        cat("Post-treatment RMSPE:", sqrt(mean(post_gaps^2)), "\n")
+        cat("Mean post-treatment gap:", mean(post_gaps), "\n")
+        cat("Mean post-treatment % diff:", mean((Y_t[years >= i$year] - Y_s[years >= i$year]) / Y_s[years >= i$year] * 100), "\n")
+        cat("RMSPE ratio (post/pre):", sqrt(mean(post_gaps^2)) / sqrt(mean(pre_gaps^2)), "\n")
     }
+}
 
-      if (!is.null(baseline_result_0)) {
-          cat("\nRunning placebo tests (this may take a while)...\n")
-          baseline_placebo_0 <- tryCatch({
-              run_placebo_test(snapshot_cs_1950_2016, "Carl Schmitt",
-                               treatment_year = 1974,
-                               pre_start = 1950, pre_end = 1973, post_end = 1984)
-          }, error = function(e) {
-              cat("ERROR in placebo test:", conditionMessage(e), "\n")
-              NULL
-          })
+if (!is.null(baseline_result_0)) {
+    cat("\nRunning placebo tests (this may take a while)...\n")
+    baseline_placebo_0 <- tryCatch({
+        run_placebo_test(snapshot_cs_1950_2016, "Carl Schmitt",
+                         treatment_year = 1974,
+                         pre_start = 1950, pre_end = 1973, post_end = 1993)
+    }, error = function(e) {
+        cat("ERROR in placebo test:", conditionMessage(e), "\n")
+        NULL
+    })
 
-          save_synth_results(baseline_result_0, baseline_placebo_0, baseline_dir_0, label="_1974")
-          cat("\nBaseline p-value (joint post std):",
-              ifelse(!is.null(baseline_placebo_0), baseline_placebo_0$joint_post_std_p, "N/A"), "\n")
-      }
+    save_synth_results(baseline_result_0, baseline_placebo_0, baseline_dir_0, label="_1974")
+    cat("\nBaseline p-value (joint post std):",
+        ifelse(!is.null(baseline_placebo_0), baseline_placebo_0$joint_post_std_p, "N/A"), "\n")
+}
 
-      if (!is.null(baseline_result_1)) {
-          cat("\nRunning placebo tests (this may take a while)...\n")
-          baseline_placebo_1 <- tryCatch({
-              run_placebo_test(snapshot_cs_1950_2016, "Carl Schmitt",
-                               treatment_year = 1983,
-                               pre_start = 1950, pre_end = 1982, post_end = 1993)
-          }, error = function(e) {
-              cat("ERROR in placebo test:", conditionMessage(e), "\n")
-              NULL
-          })
+if (!is.null(baseline_result_1)) {
+    cat("\nRunning placebo tests (this may take a while)...\n")
+    baseline_placebo_1 <- tryCatch({
+        run_placebo_test(snapshot_cs_1950_2016, "Carl Schmitt",
+                         treatment_year = 1994,
+                         pre_start = 1950, pre_end = 1993, post_end = 2016)
+    }, error = function(e) {
+        cat("ERROR in placebo test:", conditionMessage(e), "\n")
+        NULL
+    })
 
-          save_synth_results(baseline_result_1, baseline_placebo_1, baseline_dir_1, label="_1983")
-          cat("\nBaseline p-value (joint post std):",
-              ifelse(!is.null(baseline_placebo_1), baseline_placebo_1$joint_post_std_p, "N/A"), "\n")
-      }
+    save_synth_results(baseline_result_1, baseline_placebo_1, baseline_dir_1, label="_1994")
+    cat("\nBaseline p-value (joint post std):",
+        ifelse(!is.null(baseline_placebo_1), baseline_placebo_1$joint_post_std_p, "N/A"), "\n")
+}
 
-      if (!is.null(baseline_result_2)) {
-          cat("\nRunning placebo tests (this may take a while)...\n")
-          baseline_placebo_2 <- tryCatch({
-              run_placebo_test(snapshot_cs_1950_2016, "Carl Schmitt",
-                               treatment_year = 1994,
-                               pre_start = 1950, pre_end = 1993, post_end = 2016)
-          }, error = function(e) {
-              cat("ERROR in placebo test:", conditionMessage(e), "\n")
-              NULL
-          })
+if (!is.null(baseline_result_2)) {
+    cat("\nRunning placebo tests (this may take a while)...\n")
+    baseline_placebo_2 <- tryCatch({
+        run_placebo_test(snapshot_cs_1950_2016, "Carl Schmitt",
+                         treatment_year = 1965,
+                         pre_start = 1950, pre_end = 1964, post_end = 1973)
+    }, error = function(e) {
+        cat("ERROR in placebo test:", conditionMessage(e), "\n")
+        NULL
+    })
 
-          save_synth_results(baseline_result_2, baseline_placebo_2, baseline_dir_2, label="_1994")
-          cat("\nBaseline p-value (joint post std):",
-              ifelse(!is.null(baseline_placebo_2), baseline_placebo_2$joint_post_std_p, "N/A"), "\n")
-      }
-
-        if (!is.null(baseline_result_3)) {
-          cat("\nRunning placebo tests (this may take a while)...\n")
-          baseline_placebo_3 <- tryCatch({
-              run_placebo_test(snapshot_cs_1950_2016, "Carl Schmitt",
-                               treatment_year = 1965,
-                               pre_start = 1950, pre_end = 1964, post_end = 1973)
-          }, error = function(e) {
-              cat("ERROR in placebo test:", conditionMessage(e), "\n")
-              NULL
-          })
-
-          save_synth_results(baseline_result_3, baseline_placebo_3, baseline_dir_3, label="_1965")
-          cat("\nBaseline p-value (joint post std):",
-              ifelse(!is.null(baseline_placebo_3), baseline_placebo_3$joint_post_std_p, "N/A"), "\n")
-      }
+    save_synth_results(baseline_result_2, baseline_placebo_2, baseline_dir_2, label="_1965")
+    cat("\nBaseline p-value (joint post std):",
+        ifelse(!is.null(baseline_placebo_2), baseline_placebo_2$joint_post_std_p, "N/A"), "\n")
+}
 
 
-      if (!is.null(baseline_placebo_2) && !is.null(baseline_placebo_2$pval_grid)) {
-        print(baseline_placebo_2$pval_grid, n = Inf)
-      }
+if (!is.null(baseline_placebo_1) && !is.null(baseline_placebo_1$pval_grid)) {
+    print(baseline_placebo_1$pval_grid, n = Inf)
+}
